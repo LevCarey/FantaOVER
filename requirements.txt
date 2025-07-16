@@ -1,0 +1,6 @@
+streamlit
+pandas
+pathlib
+openpyxl
+numpy
+python-dotenv
