@@ -8,13 +8,23 @@ Created on Sat Jul 12 16:25:39 2025
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+import io
 
-# Prende il percorso della cartella FantaDati dal file secrets.toml
-CARTELLA_DATI = Path(st.secrets["cartella_dati"])
-FILE_ROSE = CARTELLA_DATI / "Rose Fantasquadre.xlsx"
-FILE_GIOCATORI = CARTELLA_DATI / "Database giocatori.xlsx"
+# === PERCORSI RELATIVI ===
+# La cartella base è quella dove si trova Home.py
+# In questo modo funzionano sia in locale che una volta caricati su Github
+BASE_DIR = Path(__file__).parent
+CARTELLA_DATI = BASE_DIR / "dati"
+CARTELLA_FORMAZIONI = BASE_DIR / "formazioni"
 
+# File dati
+FILE_ROSE = CARTELLA_DATI / "rose_fantasquadre.xlsx"
+FILE_GIOCATORI = CARTELLA_DATI / "database_giocatori.xlsx"
 
+# Creiamo la cartella "formazioni" se non esiste
+CARTELLA_FORMAZIONI.mkdir(parents=True, exist_ok=True)
+
+# === FUNZIONI DI CARICAMENTO DATI ===
 @st.cache_data
 def carica_rose():
     return pd.read_excel(FILE_ROSE)
@@ -23,6 +33,7 @@ def carica_rose():
 def carica_giocatori():
     return pd.read_excel(FILE_GIOCATORI)
 
+# === MODULI CONSENTITI ===
 moduli_validi = {
     "5-4-1": (5, 4, 1),
     "5-3-2": (5, 3, 2),
@@ -33,20 +44,17 @@ moduli_validi = {
     "3-4-3": (3, 4, 3),
 }
 
+# === SALVATAGGIO FILE ===
 def salva_formazione(df, username):
     """
-    Salva il DataFrame formazione nella cartella specificata nei secrets,
-    con nome file Formazione_<username>.xlsx
+    Salva il DataFrame formazione nella cartella 'formazioni' del progetto
+    con nome file formazione_<username>.xlsx
     """
-    cartella_formazioni = Path(st.secrets["cartella_formazioni"])
-    cartella_formazioni.mkdir(parents=True, exist_ok=True)
-    nome_file = cartella_formazioni / f"Formazione_{username.replace(' ', '_')}.xlsx"
+    nome_file = CARTELLA_FORMAZIONI / f"formazione_{username.replace(' ', '_')}.xlsx"
     df.to_excel(nome_file, index=False)
     return nome_file
 
-
 # === LOGIN / LOGOUT ===
-
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.nome_squadra = None
@@ -85,9 +93,7 @@ if st.sidebar.button("🔒 Logout"):
     st.session_state.username = None
     st.rerun()
 
-
-# --- CARICAMENTO DATI DOPO LOGIN ---
-
+# === CARICAMENTO DATI ===
 rose_df = carica_rose()
 giocatori_df = carica_giocatori()
 rosa = rose_df[rose_df["Presidente"] == username]
@@ -105,7 +111,7 @@ def estrai_nome(etichetta):
 
 giocatori_scelti = set()
 
-# Portiere
+# === PORTIERE ===
 st.subheader("Portiere")
 portieri_df = rosa[rosa["Ruolo"].str.contains("P")]
 portieri_options = [""] + portieri_df.apply(etichetta_giocatore, axis=1).tolist()
@@ -114,7 +120,7 @@ sel_portiere = estrai_nome(sel_portiere_label)
 if sel_portiere:
     giocatori_scelti.add(sel_portiere)
 
-# Difensori
+# === DIFENSORI ===
 st.subheader("Difensori")
 difensori_df = rosa[rosa["Ruolo"].str.contains("D")]
 difensori_options = [""] + difensori_df.apply(etichetta_giocatore, axis=1).tolist()
@@ -127,7 +133,7 @@ for i in range(n_dif):
         sel_dif.append(nome)
         giocatori_scelti.add(nome)
 
-# Centrocampisti
+# === CENTROCAMPISTI ===
 st.subheader("Centrocampisti")
 centrocampisti_df = rosa[rosa["Ruolo"].str.contains("C")]
 centrocampisti_options = [""] + centrocampisti_df.apply(etichetta_giocatore, axis=1).tolist()
@@ -140,7 +146,7 @@ for i in range(n_cent):
         sel_cent.append(nome)
         giocatori_scelti.add(nome)
 
-# Attaccanti
+# === ATTACCANTI ===
 st.subheader("Attaccanti")
 attaccanti_df = rosa[rosa["Ruolo"].str.contains("A")]
 attaccanti_options = [""] + attaccanti_df.apply(etichetta_giocatore, axis=1).tolist()
@@ -153,7 +159,7 @@ for i in range(n_att):
         sel_att.append(nome)
         giocatori_scelti.add(nome)
 
-# Panchina
+# === PANCHINA ===
 st.subheader("Panchina")
 panchina_df = rosa[~rosa["Nome"].isin(giocatori_scelti)]
 panchina_options = panchina_df.apply(etichetta_giocatore, axis=1).tolist()
@@ -164,11 +170,21 @@ panchina_selezionata = st.multiselect(
 )
 panchina = [estrai_nome(label) for label in panchina_selezionata if label]
 
+# === DOWNLOAD E SALVATAGGIO ===
+def crea_download_formazione(df, username):
+    buffer = io.BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+    filename = f"formazione_{username.replace(' ', '_')}.xlsx"
+    st.success("Formazione generata! Scarica il file e invialo al presidente via email, altrimenti verrà considerata valida l'ultima formazione inviata.")
+    st.download_button(
+        label="📥 Scarica la tua formazione",
+        data=buffer,
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
-# Prima definisci la cartella Formazioni
-CARTELLA_FORMAZIONI = Path(st.secrets["cartella_formazioni"])
-
-# === SALVA FORMAZIONE ===
+df_salva = None
 
 if st.button("Salva Formazione"):
     errori = []
@@ -231,33 +247,27 @@ if st.button("Salva Formazione"):
 
     df_salva = pd.DataFrame(dati_salva)
 
+    # Salva su disco
     nome_file = salva_formazione(df_salva, username)
     st.success(f"Formazione salvata in '{nome_file}'")
 
+    # Download immediato
+    crea_download_formazione(df_salva, username)
 
-# Mostra la formazione completa (Titolari, Panchina, Non convocati)
-
-    # Titolari: quelli con "Ruolo Modulo" non vuoto
+# === VISUALIZZAZIONE ===
+if df_salva is not None:
     titolari_df = df_salva[df_salva["Ruolo Modulo"] != ""]
     titolari_df.index = range(1, len(titolari_df) + 1)
     st.subheader("Titolari")
-    # Altezza fissa per 11 righe circa (50 px per riga * 11 = 550)
     st.dataframe(titolari_df[["Nome", "Squadra", "Ruolo", "Ruolo Modulo"]], use_container_width=True, height=423)
 
-    # Panchina: quelli con "Ruolo Modulo" vuoto
     panchina_df = df_salva[df_salva["Ruolo Modulo"] == ""]
     panchina_df.index = range(12, 12 + len(panchina_df))
     st.subheader("Panchina")
-    # Altezza fissa per 11 righe
     st.dataframe(panchina_df[["Nome", "Squadra", "Ruolo"]], use_container_width=True, height=423)
 
-    # Giocatori convocati (titolari + panchina)
     convocati = df_salva["Nome"].tolist()
-
-    # Filtra rosa per la fantasquadra corrente
     rosa_mia = rose_df[rose_df["Presidente"] == username]
-
-    # Giocatori non convocati: quelli in rosa_mia ma non in convocati
     non_convocati_df = rosa_mia[~rosa_mia["Nome"].isin(convocati)]
     non_convocati_df.index = range(1, len(non_convocati_df) + 1)
 
@@ -265,5 +275,4 @@ if st.button("Salva Formazione"):
     if len(non_convocati_df) == 0:
         st.write("Tutti i giocatori della rosa sono convocati.")
     else:
-        # Altezza fissa per 8 righe (dato che la rosa massima sono 30 giocatori)
         st.dataframe(non_convocati_df[["Nome", "Squadra", "Ruolo"]], use_container_width=True, height=317)
